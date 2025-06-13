@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: MeteoriteLandings.API/Dockerfile
+    ports:
+      - "${API_HOST_PORT}:${API_CONTAINER_PORT}"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      - DataSyncService__SyncIntervalHours=${DataSyncService__SyncIntervalHours}
+      - CorsPolicies__DefaultPolicy__Origins=${API_CORS_ORIGINS}
+      - CorsPolicies__DefaultPolicy__Headers=*
+      - CorsPolicies__DefaultPolicy__Methods=*
+    depends_on:
+      - db
+    restart: always
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend-react-ts
+      dockerfile: Dockerfile
+    ports:
+      - "${FRONTEND_HOST_PORT}:${FRONTEND_CONTAINER_PORT}"
+    depends_on:
+      - api
+    restart: always
+
+volumes:
+  pgdata:
