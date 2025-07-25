@@ -5,9 +5,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace MeteoriteLandings.Application.Services
 {
@@ -16,14 +16,16 @@ namespace MeteoriteLandings.Application.Services
         private readonly IMeteoriteRepository _meteoriteRepository;
         private readonly IMapper _mapper;
         private readonly IMemoryCache _cache;
+        private readonly ILogger<MeteoriteService> _logger;
         private const string CacheKeyPrefix = "MeteoriteLandings_";
         private const string UniqueRecClassesCacheKey = CacheKeyPrefix + "UniqueRecClasses";
 
-        public MeteoriteService(IMeteoriteRepository meteoriteRepository, IMapper mapper, IMemoryCache cache)
+        public MeteoriteService(IMeteoriteRepository meteoriteRepository, IMapper mapper, IMemoryCache cache, ILogger<MeteoriteService> logger)
         {
             _meteoriteRepository = meteoriteRepository;
             _mapper = mapper;
             _cache = cache;
+            _logger = logger;
         }
 
         public async Task<IEnumerable<MeteoriteLandingGroupedByYearDto>> GetFilteredAndGroupedLandingsAsync(
@@ -33,35 +35,13 @@ namespace MeteoriteLandings.Application.Services
 
             if (_cache.TryGetValue(cacheKey, out IEnumerable<MeteoriteLandingGroupedByYearDto>? cachedResult))
             {
-                Console.WriteLine($"Returning data from cache for key: {cacheKey}");
+                _logger.LogInformation("Returning data from cache for key: {CacheKey}", cacheKey);
                 return cachedResult!;
             }
 
-            var allLandings = await _meteoriteRepository.GetAllAsync();
+            var filteredLandings = await _meteoriteRepository.GetFilteredAsync(filter);
 
-            var query = allLandings.AsQueryable();
-
-            if (filter.StartYear.HasValue)
-            {
-                query = query.Where(m => m.Year >= filter.StartYear.Value);
-            }
-
-            if (filter.EndYear.HasValue)
-            {
-                query = query.Where(m => m.Year <= filter.EndYear.Value);
-            }
-
-            if (!string.IsNullOrWhiteSpace(filter.RecClass))
-            {
-                query = query.Where(m => m.RecClass.ToLower().Contains(filter.RecClass.ToLower()));
-            }
-
-            if (!string.IsNullOrWhiteSpace(filter.NameContains))
-            {
-                query = query.Where(m => m.Name.ToLower().Contains(filter.NameContains.ToLower()));
-            }
-
-            query = query.Where(m => m.Year.HasValue);
+            var query = filteredLandings.AsQueryable();
 
             var groupedData = query
                 .GroupBy(m => m.Year!.Value)
@@ -101,7 +81,7 @@ namespace MeteoriteLandings.Application.Services
                 .SetAbsoluteExpiration(TimeSpan.FromMinutes(5))
                 .SetSlidingExpiration(TimeSpan.FromMinutes(1));
             _cache.Set(cacheKey, result, cacheEntryOptions);
-            Console.WriteLine($"Caching data for key: {cacheKey}");
+            _logger.LogInformation("Caching data for key: {CacheKey}", cacheKey);
 
             return result;
         }
@@ -131,7 +111,7 @@ namespace MeteoriteLandings.Application.Services
         public void ClearCache()
         {
             (_cache as MemoryCache)?.Compact(1.0);
-            Console.WriteLine("Memory cache cleared.");
+            _logger.LogInformation("Memory cache cleared.");
         }
 
         public async Task<IEnumerable<string>> GetUniqueRecClassesAsync()
@@ -141,13 +121,7 @@ namespace MeteoriteLandings.Application.Services
                 return cachedClasses;
             }
 
-            var allLandings = await _meteoriteRepository.GetAllAsync();
-            var uniqueClasses = allLandings
-                .Where(m => !string.IsNullOrWhiteSpace(m.RecClass))
-                .Select(m => m.RecClass)
-                .Distinct()
-                .OrderBy(rc => rc)
-                .ToList();
+            var uniqueClasses = await _meteoriteRepository.GetDistinctRecClassesAsync();
 
             _cache.Set(UniqueRecClassesCacheKey, uniqueClasses, TimeSpan.FromDays(1));
 

@@ -10,11 +10,13 @@ namespace MeteoriteLandings.API.Middleware
     {
         private readonly RequestDelegate _next;
         private readonly ILogger<ErrorHandlingMiddleware> _logger;
+        private readonly IWebHostEnvironment _environment;
 
-        public ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorHandlingMiddleware> logger)
+        public ErrorHandlingMiddleware(RequestDelegate next, ILogger<ErrorHandlingMiddleware> logger, IWebHostEnvironment environment)
         {
             _next = next;
             _logger = logger;
+            _environment = environment;
         }
 
         public async Task InvokeAsync(HttpContext context)
@@ -30,7 +32,7 @@ namespace MeteoriteLandings.API.Middleware
             }
         }
 
-        private static Task HandleExceptionAsync(HttpContext context, Exception exception)
+        private Task HandleExceptionAsync(HttpContext context, Exception exception)
         {
             context.Response.ContentType = "application/json";
             context.Response.StatusCode = (int)HttpStatusCode.InternalServerError;
@@ -38,8 +40,8 @@ namespace MeteoriteLandings.API.Middleware
             var response = new
             {
                 Message = "An internal server error occurred.",
-                Detail = exception.Message,
-                StackTrace = exception.StackTrace
+                Detail = _environment.IsDevelopment() ? exception.Message : "An error occurred while processing your request.",
+                StackTrace = _environment.IsDevelopment() ? exception.StackTrace : null
             };
 
             var jsonResponse = JsonSerializer.Serialize(response, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });

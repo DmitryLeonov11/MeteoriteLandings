@@ -1,7 +1,10 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using MeteoriteLandings.Infrastructure.Configuration;
 
 namespace MeteoriteLandings.Infrastructure.Clients
 {
@@ -29,18 +32,21 @@ namespace MeteoriteLandings.Infrastructure.Clients
     public class NasaApiClient
     {
         private readonly HttpClient _httpClient;
-        private const string BaseUrl = "https://raw.githubusercontent.com/biggiko/nasa-dataset/refs/heads/main/y77d-th95.json";
+        private readonly ILogger<NasaApiClient> _logger;
+        private readonly NasaApiOptions _options;
 
-        public NasaApiClient(HttpClient httpClient)
+        public NasaApiClient(HttpClient httpClient, ILogger<NasaApiClient> logger, IOptions<NasaApiOptions> options)
         {
             _httpClient = httpClient;
+            _logger = logger;
+            _options = options.Value;
         }
 
         public async Task<IEnumerable<NasaMeteoriteData>?> GetMeteoriteLandingsAsync()
         {
             try
             {
-                var response = await _httpClient.GetAsync(BaseUrl);
+                var response = await _httpClient.GetAsync(_options.BaseUrl);
 
                 response.EnsureSuccessStatusCode();
 
@@ -54,17 +60,17 @@ namespace MeteoriteLandings.Infrastructure.Clients
             }
             catch (HttpRequestException e)
             {
-                Console.WriteLine($"Ошибка при запросе к NASA API: {e.Message}");
+                _logger.LogError(e, "HTTP request error when calling NASA API");
                 return null;
             }
             catch (JsonException e)
             {
-                Console.WriteLine($"Ошибка при десериализации JSON из NASA API: {e.Message}");
+                _logger.LogError(e, "JSON deserialization error when processing NASA API response");
                 return null;
             }
             catch (Exception e)
             {
-                Console.WriteLine($"Неожиданная ошибка при получении данных из NASA API: {e.Message}");
+                _logger.LogError(e, "Unexpected error when fetching data from NASA API");
                 return null;
             }
         }

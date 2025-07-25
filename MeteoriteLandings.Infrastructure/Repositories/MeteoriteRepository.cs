@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using MeteoriteLandings.Application.DTOs;
 using MeteoriteLandings.Domain.Entities;
 using MeteoriteLandings.Infrastructure.Data;
 using MeteoriteLandings.Application.Repositories;
@@ -42,6 +43,36 @@ namespace MeteoriteLandings.Infrastructure.Repositories
         public async Task<IEnumerable<MeteoriteLanding>> GetAllAsync()
         {
             return await _context.MeteoriteLandings.ToListAsync();
+        }
+
+        public async Task<IEnumerable<MeteoriteLanding>> GetFilteredAsync(MeteoriteLandingFilterDto filter)
+        {
+            var query = _context.MeteoriteLandings.AsQueryable();
+
+            if (filter.StartYear.HasValue)
+            {
+                query = query.Where(m => m.Year >= filter.StartYear.Value);
+            }
+
+            if (filter.EndYear.HasValue)
+            {
+                query = query.Where(m => m.Year <= filter.EndYear.Value);
+            }
+
+            if (!string.IsNullOrWhiteSpace(filter.RecClass))
+            {
+                query = query.Where(m => m.RecClass.ToLower().Contains(filter.RecClass.ToLower()));
+            }
+
+            if (!string.IsNullOrWhiteSpace(filter.NameContains))
+            {
+                query = query.Where(m => m.Name.ToLower().Contains(filter.NameContains.ToLower()));
+            }
+
+            // Only include meteorites with valid years
+            query = query.Where(m => m.Year.HasValue);
+
+            return await query.ToListAsync();
         }
 
         public async Task<MeteoriteLanding?> GetByExternalIdAsync(string externalId)

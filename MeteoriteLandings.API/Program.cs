@@ -5,6 +5,7 @@ using MeteoriteLandings.Infrastructure.Data;
 using MeteoriteLandings.Infrastructure.Repositories;
 using MeteoriteLandings.Application.Repositories;
 using MeteoriteLandings.Infrastructure.Services;
+using MeteoriteLandings.Infrastructure.Configuration;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json.Serialization;
 using MeteoriteLandings.API.Middleware;
@@ -20,6 +21,9 @@ builder.Services.AddControllers()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddMemoryCache();
+
+// Configuration binding
+builder.Services.Configure<NasaApiOptions>(builder.Configuration.GetSection(NasaApiOptions.SectionName));
 
 builder.Services.AddCors(options =>
 {

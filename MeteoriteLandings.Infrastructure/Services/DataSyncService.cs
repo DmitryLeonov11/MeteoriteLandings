@@ -18,8 +18,6 @@ namespace MeteoriteLandings.Infrastructure.Services
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly int _syncIntervalMinutes;
 
-        private const string NasaApiUrl = "https://raw.githubusercontent.com/biggiko/nasa-dataset/refs/heads/main/y77d-th95.json"; // 
-
         public DataSyncService(ILogger<DataSyncService> logger, IServiceScopeFactory scopeFactory, int syncIntervalMinutes)
         {
             _logger = logger;

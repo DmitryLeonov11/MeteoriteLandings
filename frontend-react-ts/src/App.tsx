@@ -14,6 +14,9 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:7000
 const MIN_YEAR = 1800;
 const MAX_YEAR = new Date().getFullYear();
 
+// Generate years array once outside component to avoid recreation on each render
+const YEARS_ARRAY = Array.from({ length: MAX_YEAR - MIN_YEAR + 1 }, (_, i) => MIN_YEAR + i);
+
 function App() {
     const [landings, setLandings] = useState<MeteoriteLandingGroupedByYearDto[]>([]);
     const [loading, setLoading] = useState<boolean>(false);
@@ -93,13 +96,8 @@ function App() {
         fetchData();
     }, [fetchData]);
 
-    const years = useMemo(() => {
-        const yearsArray: number[] = [];
-        for (let year = MIN_YEAR; year <= MAX_YEAR; year++) {
-            yearsArray.push(year);
-        }
-        return yearsArray;
-    }, []);
+    // Use the pre-computed years array
+    const years = YEARS_ARRAY;
 
     const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const { name, value } = e.target;
