@@ -6,6 +6,7 @@ using MeteoriteLandings.Infrastructure.Repositories;
 using MeteoriteLandings.Application.Repositories;
 using MeteoriteLandings.Infrastructure.Services;
 using MeteoriteLandings.Infrastructure.Configuration;
+using MeteoriteLandings.Infrastructure.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json.Serialization;
 using MeteoriteLandings.API.Middleware;
@@ -22,8 +23,11 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddMemoryCache();
 
-// Configuration binding
-builder.Services.Configure<NasaApiOptions>(builder.Configuration.GetSection(NasaApiOptions.SectionName));
+// Configuration binding with validation
+builder.Services.AddOptions<NasaApiOptions>()
+    .Bind(builder.Configuration.GetSection(NasaApiOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 builder.Services.AddCors(options =>
 {
@@ -45,6 +49,19 @@ builder.Services.AddDbContextPool<ApplicationDbContext>(options =>
 builder.Services.AddScoped<IMeteoriteRepository, MeteoriteRepository>();
 builder.Services.AddScoped<IMeteoriteService, MeteoriteService>();
 builder.Services.AddScoped<ICacheClearer, MeteoriteService>();
+
+// Register resilience services
+builder.Services.AddScoped<RetryPolicyService>();
+builder.Services.AddSingleton<CircuitBreakerService>();
+
+// Health Checks
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("database", tags: new[] { "db", "ready" })
+    .AddCheck<NasaApiHealthCheck>("nasa-api", tags: new[] { "external", "ready" })
+    .AddCheck("self", () => Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("API is running"), tags: new[] { "ready" });
+
+// Register HttpClient for NASA API Health Check
+builder.Services.AddHttpClient<NasaApiHealthCheck>();
 
 builder.Services.AddHttpClient<NasaApiClient>();
 
@@ -89,6 +106,40 @@ app.UseHttpsRedirection();
 app.UseCors("DefaultPolicy");
 
 app.UseAuthorization();
+
+// Health Check endpoints
+app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        var response = new
+        {
+            status = report.Status.ToString(),
+            timestamp = DateTimeOffset.UtcNow,
+            checks = report.Entries.Select(e => new
+            {
+                name = e.Key,
+                status = e.Value.Status.ToString(),
+                duration = e.Value.Duration.TotalMilliseconds,
+                description = e.Value.Description,
+                exception = e.Value.Exception?.Message
+            })
+        };
+        await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(response, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase }));
+    }
+});
+
+app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready")
+});
+
+app.MapHealthChecks("/health/live", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
+{
+    Predicate = _ => false // Only basic liveness check
+});
+
 app.MapControllers();
 
 app.Run();
