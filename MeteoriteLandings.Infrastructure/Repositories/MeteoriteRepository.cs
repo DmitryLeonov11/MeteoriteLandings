@@ -49,6 +49,9 @@ namespace MeteoriteLandings.Infrastructure.Repositories
         {
             var query = _context.MeteoriteLandings.AsQueryable();
 
+            // Only include meteorites with valid years first for better performance
+            query = query.Where(m => m.Year.HasValue);
+
             if (filter.StartYear.HasValue)
             {
                 query = query.Where(m => m.Year >= filter.StartYear.Value);
@@ -61,16 +64,15 @@ namespace MeteoriteLandings.Infrastructure.Repositories
 
             if (!string.IsNullOrWhiteSpace(filter.RecClass))
             {
-                query = query.Where(m => m.RecClass.ToLower().Contains(filter.RecClass.ToLower()));
+                var normalizedRecClass = filter.RecClass.Trim();
+                query = query.Where(m => EF.Functions.ILike(m.RecClass, $"%{normalizedRecClass}%"));
             }
 
             if (!string.IsNullOrWhiteSpace(filter.NameContains))
             {
-                query = query.Where(m => m.Name.ToLower().Contains(filter.NameContains.ToLower()));
+                var normalizedName = filter.NameContains.Trim();
+                query = query.Where(m => EF.Functions.ILike(m.Name, $"%{normalizedName}%"));
             }
-
-            // Only include meteorites with valid years
-            query = query.Where(m => m.Year.HasValue);
 
             return await query.ToListAsync();
         }

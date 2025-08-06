@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using MeteoriteLandings.Application.DTOs;
 using MeteoriteLandings.Application.Repositories;
 using System.Collections.Generic;
@@ -8,6 +8,8 @@ using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace MeteoriteLandings.Application.Services
 {
@@ -31,11 +33,11 @@ namespace MeteoriteLandings.Application.Services
         public async Task<IEnumerable<MeteoriteLandingGroupedByYearDto>> GetFilteredAndGroupedLandingsAsync(
             MeteoriteLandingFilterDto filter)
         {
-            var cacheKey = $"MeteoriteLandings_{JsonSerializer.Serialize(filter)}";
+            var cacheKey = GenerateCacheKey(filter);
 
             if (_cache.TryGetValue(cacheKey, out IEnumerable<MeteoriteLandingGroupedByYearDto>? cachedResult))
             {
-                _logger.LogInformation("Returning data from cache for key: {CacheKey}", cacheKey);
+                _logger.LogInformation("Cache hit for filter query");
                 return cachedResult!;
             }
 
@@ -110,22 +112,65 @@ namespace MeteoriteLandings.Application.Services
 
         public void ClearCache()
         {
-            (_cache as MemoryCache)?.Compact(1.0);
-            _logger.LogInformation("Memory cache cleared.");
+            try
+            {
+                if (_cache is MemoryCache memoryCache)
+                {
+                    memoryCache.Compact(1.0);
+                    _logger.LogInformation("Memory cache cleared successfully");
+                }
+                else
+                {
+                    _logger.LogWarning("Cache is not MemoryCache type, cannot clear");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error occurred while clearing cache");
+            }
         }
 
         public async Task<IEnumerable<string>> GetUniqueRecClassesAsync()
         {
             if (_cache.TryGetValue(UniqueRecClassesCacheKey, out IEnumerable<string> cachedClasses))
             {
+                _logger.LogInformation("Cache hit for unique rec classes");
                 return cachedClasses;
             }
 
+            _logger.LogInformation("Cache miss for unique rec classes, fetching from database");
             var uniqueClasses = await _meteoriteRepository.GetDistinctRecClassesAsync();
 
-            _cache.Set(UniqueRecClassesCacheKey, uniqueClasses, TimeSpan.FromDays(1));
+            var cacheOptions = new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromDays(1),
+                Priority = CacheItemPriority.Normal
+            };
+            
+            _cache.Set(UniqueRecClassesCacheKey, uniqueClasses, cacheOptions);
 
             return uniqueClasses;
+        }
+
+        private static string GenerateCacheKey(MeteoriteLandingFilterDto filter)
+        {
+            // Create a deterministic string representation of the filter
+            var keyBuilder = new StringBuilder();
+            keyBuilder.Append($"start:{filter.StartYear?.ToString() ?? "null"}");
+            keyBuilder.Append($"|end:{filter.EndYear?.ToString() ?? "null"}");
+            keyBuilder.Append($"|class:{filter.RecClass?.Trim() ?? "null"}");
+            keyBuilder.Append($"|name:{filter.NameContains?.Trim() ?? "null"}");
+            keyBuilder.Append($"|sort:{filter.SortBy?.ToLowerInvariant() ?? "null"}");
+            keyBuilder.Append($"|order:{filter.SortOrder?.ToLowerInvariant() ?? "null"}");
+
+            var keyString = keyBuilder.ToString();
+            
+            // Generate SHA256 hash for consistent, shorter cache keys
+            using var sha256 = SHA256.Create();
+            var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(keyString));
+            var hashString = Convert.ToBase64String(hashBytes).Replace("/", "_").Replace("+", "-").TrimEnd('=');
+            
+            return $"{CacheKeyPrefix}{hashString}";
         }
     }
 }

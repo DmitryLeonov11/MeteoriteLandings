@@ -15,7 +15,7 @@ const MIN_YEAR = 1800;
 const MAX_YEAR = new Date().getFullYear();
 
 // Generate years array once outside component to avoid recreation on each render
-const YEARS_ARRAY = Array.from({ length: MAX_YEAR - MIN_YEAR + 1 }, (_, i) => MIN_YEAR + i);
+const YEARS_ARRAY = Array.from({ length: MAX_YEAR - MIN_YEAR + 1 }, (_, i) => MIN_YEAR + i).reverse();
 
 function App() {
     const [landings, setLandings] = useState<MeteoriteLandingGroupedByYearDto[]>([]);
@@ -33,29 +33,56 @@ function App() {
 
     const [uniqueRecClasses, setUniqueRecClasses] = useState<string[]>([]);
 
-    const fetchData = useCallback(async () => {
+    // Debounced fetch to avoid too many API calls
+    const debouncedFetch = useMemo(() => {
+        let timeoutId: NodeJS.Timeout;
+        return (filterToUse: MeteoriteLandingFilterDto) => {
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
+                fetchData(filterToUse);
+            }, 300);
+        };
+    }, []);
+
+    const fetchData = useCallback(async (filterToUse: MeteoriteLandingFilterDto) => {
         setLoading(true);
         setApiErrors(null);
         setGeneralError(null);
 
         const params = new URLSearchParams();
-        if (filter.startYear) params.append('startYear', filter.startYear.toString());
-        if (filter.endYear) params.append('endYear', filter.endYear.toString());
-        if (filter.recClass && filter.recClass !== '') params.append('recClass', filter.recClass);
-        if (filter.nameContains) params.append('nameContains', filter.nameContains);
-        if (filter.sortBy) params.append('sortBy', filter.sortBy);
-        if (filter.sortOrder) params.append('sortOrder', filter.sortOrder);
+        if (filterToUse.startYear) params.append('startYear', filterToUse.startYear.toString());
+        if (filterToUse.endYear) params.append('endYear', filterToUse.endYear.toString());
+        if (filterToUse.recClass && filterToUse.recClass !== '') params.append('recClass', filterToUse.recClass);
+        if (filterToUse.nameContains?.trim()) params.append('nameContains', filterToUse.nameContains.trim());
+        if (filterToUse.sortBy) params.append('sortBy', filterToUse.sortBy);
+        if (filterToUse.sortOrder) params.append('sortOrder', filterToUse.sortOrder);
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/meteorites?${params.toString()}`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+            
+            const response = await fetch(`${API_BASE_URL}/api/meteorites?${params.toString()}`, {
+                signal: controller.signal,
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                },
+            });
+            
+            clearTimeout(timeoutId);
 
             if (!response.ok) {
-                const errorData = await response.json();
+                const errorData = await response.json().catch(() => ({ 
+                    error: `HTTP ${response.status}: ${response.statusText}` 
+                }));
+                
                 console.error("API Error Response:", errorData);
 
                 if (errorData.errors) {
                     setApiErrors(errorData.errors as ApiErrors);
                     setGeneralError("Validation errors occurred. Please check the form.");
+                } else if (errorData.error) {
+                    setGeneralError(errorData.error);
                 } else if (typeof errorData === 'string' || (Array.isArray(errorData) && errorData.every(item => typeof item === 'string'))) {
                     setGeneralError(Array.isArray(errorData) ? errorData.join(', ') : errorData);
                 } else {
@@ -63,15 +90,23 @@ function App() {
                 }
             } else {
                 const data = await response.json();
-                setLandings(data);
+                setLandings(Array.isArray(data) ? data : []);
             }
         } catch (error) {
-            console.error("Fetch Error:", error);
-            setGeneralError(`Failed to fetch data: ${error instanceof Error ? error.message : String(error)}`);
+            if (error instanceof Error) {
+                if (error.name === 'AbortError') {
+                    setGeneralError('Request timed out. Please try again.');
+                } else {
+                    console.error("Fetch Error:", error);
+                    setGeneralError(`Network error: ${error.message}`);
+                }
+            } else {
+                setGeneralError('An unexpected error occurred.');
+            }
         } finally {
             setLoading(false);
         }
-    }, [filter]);
+    }, []);
 
     useEffect(() => {
         const fetchRecClasses = async () => {
@@ -92,30 +127,49 @@ function App() {
         fetchRecClasses();
     }, []);
 
+    // Initial data fetch and filter changes
     useEffect(() => {
-        fetchData();
-    }, [fetchData]);
+        fetchData(filter);
+    }, []); // Only on mount
+
+    // Use debounced fetch for filter changes except sorting
+    useEffect(() => {
+        const { sortBy, sortOrder, ...filterWithoutSort } = filter;
+        const hasFilterValues = Object.values(filterWithoutSort).some(val => val !== undefined && val !== '');
+        
+        if (hasFilterValues) {
+            debouncedFetch(filter);
+        } else {
+            // If no filters, fetch immediately
+            fetchData(filter);
+        }
+    }, [filter.startYear, filter.endYear, filter.recClass, filter.nameContains, debouncedFetch]);
+
+    // Immediate fetch for sorting changes
+    useEffect(() => {
+        fetchData(filter);
+    }, [filter.sortBy, filter.sortOrder, fetchData]);
 
     // Use the pre-computed years array
     const years = YEARS_ARRAY;
 
-    const handleSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const handleSelectChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
         const { name, value } = e.target;
         setFilter(prevFilter => ({
             ...prevFilter,
             [name]: value === '' ? undefined : (name === 'startYear' || name === 'endYear' ? parseInt(value, 10) : value)
         }));
-    };
+    }, []);
 
-    const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleFilterChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
         setFilter(prevFilter => ({
             ...prevFilter,
             [name]: value
         }));
-    };
+    }, []);
 
-    const handleSort = (sortByOption: SortByOption) => {
+    const handleSort = useCallback((sortByOption: SortByOption) => {
         setFilter(prevFilter => {
             const newSortOrder: SortOrderOption = (prevFilter.sortBy === sortByOption && prevFilter.sortOrder === 'asc') ? 'desc' : 'asc';
             return {
@@ -124,7 +178,7 @@ function App() {
                 sortOrder: newSortOrder
             };
         });
-    };
+    }, []);
 
     const renderFieldErrors = (fieldName: string) => {
         if (apiErrors && apiErrors[fieldName]) {
@@ -199,7 +253,9 @@ function App() {
                     {renderFieldErrors("nameContains")}
                 </div>
 
-                <button onClick={fetchData}>Apply Filters</button>
+                <button onClick={() => fetchData(filter)} disabled={loading}>
+                    {loading ? 'Loading...' : 'Apply Filters'}
+                </button>
             </div>
 
             {generalError && <div className="general-error">{generalError}</div>}
